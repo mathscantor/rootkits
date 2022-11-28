@@ -8,19 +8,14 @@
 #include <linux/linkage.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/version.h>
-
-#if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
-#define PTREGS_SYSCALL_STUBS 1
-#endif
+#include "../utils/version_handler.h"
 
 /*
  * On Linux kernels 5.7+, kallsyms_lookup_name() is no longer exported, 
  * so we have to use kprobes to get the address.
  * Full credit to @f0lg0 for the idea.
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
-#define KPROBE_LOOKUP 1
+#ifdef KPROBE_LOOKUP
 #include <linux/kprobes.h>
 static struct kprobe kp = {
     .symbol_name = "kallsyms_lookup_name"
