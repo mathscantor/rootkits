@@ -10,8 +10,10 @@
 /* DESCRIPTION
 * Handles the presence of this rootkit - Hides from lsmod and ls
 *
-* Hide Presence: kill -61 0
-* Show Presence: kill -61 1
+* kill -61 1 # Hide directories, processes and itself
+* kill -61 0 # Unhide directories, processes and itself
+* kill -62 <pid> # Add process to hide
+* kill -63 <pid> # Remove process to hide
 */
 
 /* GLOBAL VARIABLES */
