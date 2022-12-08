@@ -45,7 +45,7 @@ linked_list_node_t* remove_node(linked_list_node_t *head_node, char *name, int l
     }
 
     while (curr_node != NULL) {
-        if ((memcmp(curr_node->name, name, MAX_CHAR) == 0)) {
+        if ((strncmp(curr_node->name, name, MAX_CHAR) == 0)) {
             if (curr_node == head_node) {
                 head_node = curr_node->next;
             } else {
